@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- MiniMax TTS (extras/tts_minimax_server.py) on 127.0.0.1:8125. Stdlib only, no venv needed.
+     Copy tts_minimax_server.py into __HOME__/Library/Application Support/StackChanTTS/, replace __HOME__,
+     fill in the two MiniMax values (never commit them), then:
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.stackchan-tts.plist -->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
+		<key>TTS_PORT</key>
+		<string>8125</string>
+		<key>MINIMAX_API_KEY</key>
+		<string>YOUR_MINIMAX_API_KEY</string>
+		<key>MINIMAX_VOICE_ID</key>
+		<string>YOUR_CLONED_VOICE_ID</string>
+		<!-- 1 = stream; the server's default is 0 (wait for the whole sentence) -->
+		<key>MINIMAX_STREAM</key>
+		<string>1</string>
+		<key>MINIMAX_MODEL</key>
+		<string>speech-2.8-turbo</string>
+		<key>MINIMAX_HOST</key>
+		<string>https://api.minimax.io</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.example.stackchan-tts</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>__HOME__/Library/Application Support/StackChanTTS/tts_minimax_server.py</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/Library/Logs/stackchan-tts.log</string>
+	<key>StandardOutPath</key>
+	<string>__HOME__/Library/Logs/stackchan-tts.log</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+</dict>
+</plist>

@@ -1,0 +1,42 @@
+# SC_ExConfig.yaml.example — 固件扩展配置模板（放 SD 卡 /app/AiStackChanEx/ 下）
+# key 名来自 StackchanExConfig.cpp 的 doc["段"]["键"]；值全是占位符。
+# 类型枚举见 StackchanExConfig.h：LLM 0=ChatGPT 1=ModuleLLM 2=ModuleLLM_FNCL 3=Gemini 4=CustomOpenAI；
+# TTS 0=VoiceVox 1=ElevenLabs 2=OpenAI 3=AquesTalk 4=ModuleLLM；STT 0=Google 1=OpenAI_Whisper 2=ModuleLLM_ASR 3=ModuleLLM_Whisper；
+# WakeWord 0=SimpleVox 1=ModuleLLM_KWS。
+
+llm:
+  type: 4                      # 本方案：CustomOpenAI，指向自家网关/VPS
+  model: ""                   # CustomOpenAI 必填；空会被拒绝
+  customEndpoint: "https://YOUR_VPS_IP:8446/v1/chat/completions"
+  customRootCAFile: "/shim_ca.pem"   # https 必配；http 可空
+  # customRootCAFiles: ["/ca1.pem"]  # 可选：多个 CA 拼成一个 bundle
+  mcpServers: []               # 可选，最多 10 项；每项 {name, disabled, url, port}
+  enableMemory: false
+
+tts:
+  type: 2                      # 本方案：OpenAI 分支，customEndpoint 指向 Mac TTS 服务
+  model: ""
+  voice: ""
+  customEndpoint: "https://YOUR_VPS_IP:8446/v1/audio/speech"  # 经 VPS 中转到网关的 TTS 代理；出门在外也能用
+  customRootCAFile: "/shim_ca.pem"   # https 必配（每个分区各读各的）
+  # 只在家用时也可以直连：http://YOUR_MAC_LAN_IP:8124/v1/audio/speech（出了家门就不通）
+  audioFormat: "mp3"          # 设备解码器只认 "mp3" 或 "wav"；长中继推荐 mp3（见 docs/FIELD_NOTES.md #2）
+
+stt:
+  type: 1                      # OpenAI_Whisper 分支
+  model: "whisper-1"
+  language: "zh"               # 空 = 省略 language 字段，让服务端自判
+  customEndpoint: "https://YOUR_VPS_IP:8446/v1/audio/transcriptions"  # 同上，经 VPS 中转
+  customRootCAFile: "/shim_ca.pem"   # https 必配
+  # 只在家用时也可以直连：http://YOUR_MAC_LAN_IP:8124/v1/audio/transcriptions（出了家门就不通）
+
+wakeword:
+  type: 0
+  keyword: ""                   # TODO(owner)：确认唤醒词是否在用
+
+audio:
+  speaker_volume: 200
+
+moduleLLM:
+  rxPin: -1
+  txPin: -1

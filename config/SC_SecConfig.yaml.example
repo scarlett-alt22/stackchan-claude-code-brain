@@ -1,0 +1,22 @@
+# SC_SecConfig.yaml.example — 固件密钥配置模板（放 SD 卡 /yaml/ 下，同时放一份到仓库根 SD-staging/yaml/）
+# 警告：这是密钥文件。真实文件绝不进 git（.gitignore 已排除 SD-staging/）。
+# 开机时本文件会被镜像进内部 SPIFFS，之后 SD 卡可拔掉。
+# 格式跟上游 AI_StackChan_Ex 的 Copy-to-SD/yaml/SC_SecConfig.yaml 一样。
+
+# 主 Wi-Fi（家里）
+wifi:
+  ssid: "YOUR_HOME_SSID"
+  password: "YOUR_HOME_PASSWORD"
+
+# 第二 Wi-Fi（手机热点，出门用）。整个 wifi2 段可选；ssid 为空 = 没配。
+wifi2:
+  ssid: "YOUR_HOTSPOT_SSID"
+  password: "YOUR_HOTSPOT_PASSWORD"
+
+# 设备发给网关的 Bearer token。自己生成两个随机串，例如：
+#   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+# 网关只存它们的 SHA-256（gateway/install_runtime.py 会算好写进 LaunchAgent）。
+apikey:
+  aiservice: "YOUR_DEVICE_TOKEN"  # 对话 /v1/chat/completions、拍照 /v1/photos
+  tts: "YOUR_DEVICE_TOKEN"        # 必须和 aiservice 填同一个：网关的 TTS 入口用设备 token 鉴权
+  stt: "YOUR_STT_TOKEN"           # 语音识别单独一个 token

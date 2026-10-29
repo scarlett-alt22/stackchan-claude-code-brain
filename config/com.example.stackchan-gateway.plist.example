@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.stackchan-gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/python3.12</string>
+    <string>__HOME__/Library/Application Support/StackChanGateway/stackchan_gateway.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>STACKCHAN_GATEWAY_HOST</key>
+    <string>0.0.0.0</string>
+    <key>STACKCHAN_GATEWAY_PORT</key>
+    <string>8124</string>
+    <key>STACKCHAN_UPSTREAM_URL</key>
+    <string>https://YOUR_VPS_IP:8443/v1/chat/completions</string>
+    <key>STACKCHAN_UPSTREAM_CA</key>
+    <string>__HOME__/Library/Application Support/StackChanGateway/shim_ca.pem</string>
+    <!-- 设备鉴权只存 SHA-256 单向值，不存明文 token -->
+    <key>STACKCHAN_DEVICE_TOKEN_SHA256</key>
+    <string>SHA256_OF_YOUR_DEVICE_TOKEN</string>
+    <!-- STT 上游：本地 SenseVoice :8127（Whisper 备选是 :8126）。想换远端就改这两个变量，网关代码零改动。 -->
+    <key>STACKCHAN_STT_UPSTREAM_URL</key>
+    <string>http://127.0.0.1:8127/v1/audio/transcriptions</string>
+    <key>STACKCHAN_STT_TOKEN_SHA256</key>
+    <string>SHA256_OF_YOUR_STT_TOKEN</string>
+    <!-- 回环流量不许走系统代理：大小写两份都要（urllib 认小写，别家认大写）。 -->
+    <key>NO_PROXY</key>
+    <string>127.0.0.1,localhost</string>
+    <key>no_proxy</key>
+    <string>127.0.0.1,localhost</string>
+    <!-- Brain：cc = fork 你的 Claude Code 会话回答；改成 api（或删掉）= 退回 VPS 透传。
+         PATH 是给 claude 子进程的：launchd 默认 PATH 里没有 /opt/homebrew/bin。 -->
+    <key>STACKCHAN_BRAIN</key>
+    <string>cc</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/stackchan-gateway.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/stackchan-gateway.log</string>
+</dict>
+</plist>

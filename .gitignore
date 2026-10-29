@@ -1,0 +1,15 @@
+# secrets and per-device files: never commit
+SD-staging/
+*.pem
+SC_SecConfig.yaml
+.env
+owner_profile.txt
+# runtime data
+robot-log.jsonl
+photos/
+# internal release notes: keep out of the public repo
+PUBLISHING_CHECKLIST.md
+# build output
+firmware/.pio/
+__pycache__/
+*.bak-*

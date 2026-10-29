@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Local STT (extras/sensevoice/sv_server.py) on 127.0.0.1:8127.
+     Copy extras/sensevoice/ into __HOME__/Library/Application Support/StackChanSenseVoice/,
+     create the venv there (python3 -m venv .venv && .venv/bin/pip install sherpa-onnx numpy),
+     put the two models under models/ (see BUILD.md A1), replace __HOME__, then:
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.stackchan-sensevoice.plist -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.example.stackchan-sensevoice</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__HOME__/Library/Application Support/StackChanSenseVoice/.venv/bin/python</string>
+		<string>__HOME__/Library/Application Support/StackChanSenseVoice/sv_server.py</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>__HOME__/Library/Application Support/StackChanSenseVoice</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
+		<key>STT_HOST</key>
+		<string>127.0.0.1</string>
+		<key>STT_PORT</key>
+		<string>8127</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>__HOME__/Library/Logs/stackchan-sensevoice.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/Library/Logs/stackchan-sensevoice.log</string>
+</dict>
+</plist>

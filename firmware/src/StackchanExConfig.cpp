@@ -1,0 +1,341 @@
+#include "StackchanExConfig.h"
+#include "share/SDUtil.h"
+
+StackchanExConfig::StackchanExConfig() {};
+StackchanExConfig::~StackchanExConfig() {};
+
+
+void StackchanExConfig::basicConfigNotFoundCallback(void)
+{
+    char buf[128], data[128];
+    char *endp;
+    String SV_ON_OFF = "";
+
+    Serial.printf("Cannot open YAML basic config file. Try to read legacy text file.\n");
+
+    /// Servo
+    if(read_sd_file("/servo.txt", buf, sizeof(buf))){
+        read_line_from_buf(buf, data);
+        SV_ON_OFF = String(data);
+        if (SV_ON_OFF == "on" || SV_ON_OFF == "ON"){
+            USE_SERVO_ST = true;
+        }
+        else{
+            USE_SERVO_ST = false;
+        }
+        Serial.printf("Servo ON or OFF: %s\n",data);
+
+        read_line_from_buf(nullptr, data);
+        _servo[AXIS_X].pin = strtol(data, &endp, 10);
+        Serial.printf("Servo pin X: %d\n", _servo[AXIS_X].pin);
+
+        read_line_from_buf(nullptr, data);
+        _servo[AXIS_Y].pin = strtol(data, &endp, 10);
+        Serial.printf("Servo pin Y: %d\n", _servo[AXIS_Y].pin);
+    }
+    else{
+        Serial.printf("Cannot open legacy text file. Set default value.\n");
+        _servo[AXIS_X].pin = DEFAULT_SERVO_PIN_X;
+        _servo[AXIS_Y].pin = DEFAULT_SERVO_PIN_Y;
+        Serial.printf("Servo pin X: %d\n", _servo[AXIS_X].pin);
+        Serial.printf("Servo pin Y: %d\n", _servo[AXIS_Y].pin);
+    }
+}
+
+void StackchanExConfig::secretConfigNotFoundCallback(void)
+{
+    char buf[128], data[128];
+
+    Serial.printf("Cannot open YAML secret config file. Try to read legacy text file.\n");
+
+    /// wifi
+    if(read_sd_file("/wifi.txt", buf, sizeof(buf))){
+        read_line_from_buf(buf, data);
+        _secret_config.wifi_info.ssid = String(data);
+        Serial.printf("SSID: %s\n",data);
+
+        read_line_from_buf(nullptr, data);
+        _secret_config.wifi_info.password = String(data);
+        Serial.printf("Key: %s\n",data);
+    }
+
+    /// apikey
+    if(read_sd_file("/apikey.txt", buf, sizeof(buf))){
+        read_line_from_buf(buf, data);
+        _secret_config.api_key.ai_service = String(data);
+        Serial.printf("openai: %s\n",data);
+
+        read_line_from_buf(nullptr, data);
+        _secret_config.api_key.tts = String(data);
+        Serial.printf("voicevox: %s\n",data);
+
+        read_line_from_buf(nullptr, data);
+        _secret_config.api_key.stt = String(data);
+        Serial.printf("stt: %s\n",data);
+    }
+}
+
+void StackchanExConfig::loadExtendConfig(fs::FS& fs, const char* yaml_filename, uint32_t yaml_size)
+{
+    M5_LOGI("----- StackchanExConfig::loadExtendConfig:%s\n", yaml_filename);
+    _extend_fs = &fs;
+    File file = fs.open(yaml_filename);
+    if (file) {
+        DynamicJsonDocument doc(yaml_size);
+        auto err = deserializeYml( doc, file);
+        if (err) {
+            M5_LOGE("yaml file read error: %s\n", yaml_filename);
+            M5_LOGE("error%s\n", err.c_str());
+            extendConfigNotFoundCallback();
+        }
+        else{
+            setExtendSettings(doc);
+        }
+
+        serializeJsonPretty(doc, Serial);
+        M5_LOGI("");
+        printExtParameters();
+
+    }
+    else{
+        //YAMLファイルオープン失敗の場合は、SDのディレクトリ直下に旧TXTファイルがあれば読み込む
+        M5_LOGE("yaml file open error: %s\n", yaml_filename);
+        extendConfigNotFoundCallback();
+        printExtParameters();
+    }
+}
+
+void StackchanExConfig::extendConfigNotFoundCallback(void)
+{
+    M5_LOGE("load extend config from txt files\n");
+
+}
+
+// ★ OWNER 2026-10-04: 双 Wi-Fi —— 解析 secret yaml 里可选的 wifi2: 段。
+// 第三方库（Stackchan_system_config）的 setSecretConfig 不是虚函数且只认
+// wifi.ssid/wifi.password，改它会被 PlatformIO 覆盖；这里在 loadConfig() 之后
+// 把 secret yaml 再读一遍，只取 wifi2。没有 wifi2: 段就和原来完全一样。
+void StackchanExConfig::loadWifi2Setting(fs::FS& fs, const char* secret_yaml_filename)
+{
+    _wifi2.ssid = "";
+    _wifi2.password = "";
+    File file = fs.open(secret_yaml_filename);
+    if (!file) {
+        return;
+    }
+    DynamicJsonDocument doc(2048);
+    auto err = deserializeYml(doc, file);
+    file.close();
+    if (err) {
+        M5_LOGE("wifi2 yaml read error: %s\n", secret_yaml_filename);
+        return;
+    }
+    if (doc["wifi2"]["ssid"].is<const char*>()) {
+        _wifi2.ssid = doc["wifi2"]["ssid"].as<String>();
+    }
+    if (doc["wifi2"]["password"].is<const char*>()) {
+        _wifi2.password = doc["wifi2"]["password"].as<String>();
+    }
+    if (_wifi2.ssid.length() > 0) {
+        // 只打 SSID，不打密码。
+        M5_LOGI("wifi2 configured: SSID=%s", _wifi2.ssid.c_str());
+    }
+}
+
+// ★ OWNER 2026-07-05: 把追加目标改为参数 `target`, 使 LLM 与 STT 复用同一个加载逻辑。
+void StackchanExConfig::appendRootCAFromFile(const String& ca_path, String& target)
+{
+    if(_extend_fs == nullptr || ca_path.length() == 0){
+        return;
+    }
+    File ca_file = _extend_fs->open(ca_path.c_str());
+    if(!ca_file){
+        M5_LOGE("customRootCAFile not found: %s", ca_path.c_str());
+        return;
+    }
+    size_t sz = ca_file.size();
+    // Reserve room for the new file plus a separating newline.
+    target.reserve(target.length() + sz + 2);
+    // Separate concatenated PEM blocks with a newline so the "-----END-----"
+    // of one cert never runs into the "-----BEGIN-----" of the next.
+    if(target.length() > 0 && !target.endsWith("\n")){
+        target += "\n";
+    }
+    while(ca_file.available()){
+        char chunk[128];
+        int n = ca_file.readBytes(chunk, sizeof(chunk) - 1);
+        if(n <= 0) break;
+        chunk[n] = 0;
+        target += chunk;
+    }
+    ca_file.close();
+}
+
+void StackchanExConfig::setExtendSettings(DynamicJsonDocument doc)
+{
+    _ex_parameters.llm.type         = doc["llm"]["type"].as<int>();
+    _ex_parameters.llm.model        = doc["llm"]["model"].as<String>();
+    _ex_parameters.llm.nMcpServers  = doc["llm"]["mcpServers"].size();
+    for(int i=0; i<_ex_parameters.llm.nMcpServers; i++){
+        _ex_parameters.llm.mcpServer[i].name = doc["llm"]["mcpServers"][i]["name"].as<String>();
+        _ex_parameters.llm.mcpServer[i].disabled = doc["llm"]["mcpServers"][i]["disabled"].as<bool>();
+        _ex_parameters.llm.mcpServer[i].url = doc["llm"]["mcpServers"][i]["url"].as<String>();
+        _ex_parameters.llm.mcpServer[i].port = doc["llm"]["mcpServers"][i]["port"].as<int>();
+    }
+    _ex_parameters.llm.enableMemory = doc["llm"]["enableMemory"].as<bool>();
+    _ex_parameters.llm.customRootCA = "";
+    // Build the trusted CA bundle from a single customRootCAFile (string) and/or a
+    // customRootCAFiles list. Each PEM file is appended into one buffer; mbedTLS
+    // (via WiFiClientSecure::setCACert) parses the concatenated PEM blocks and
+    // trusts every certificate as a root, so chains with several roots work.
+    if(doc["llm"]["customRootCAFiles"].is<JsonArray>()){
+        JsonArray ca_files = doc["llm"]["customRootCAFiles"].as<JsonArray>();
+        for(JsonVariant ca_file_path : ca_files){
+            appendRootCAFromFile(ca_file_path.as<String>(), _ex_parameters.llm.customRootCA);
+        }
+    }
+    if(doc["llm"]["customRootCAFile"].is<const char*>()){
+        appendRootCAFromFile(doc["llm"]["customRootCAFile"].as<String>(), _ex_parameters.llm.customRootCA);
+    }
+    if(doc["llm"]["customEndpoint"].is<const char*>()){
+        _ex_parameters.llm.customEndpoint = doc["llm"]["customEndpoint"].as<String>();
+        if(_ex_parameters.llm.customEndpoint.startsWith("https://") && _ex_parameters.llm.customRootCA.length() == 0){
+            // Keep the endpoint so requests are refused at send time rather
+            // than silently retargeted to api.openai.com.
+            M5_LOGE("llm customEndpoint is https:// but no customRootCAFile was loaded; requests will be refused: %s",
+                    _ex_parameters.llm.customEndpoint.c_str());
+        }
+    }
+    else{
+        _ex_parameters.llm.customEndpoint = "";
+    }
+    if((_ex_parameters.llm.type == LLM_TYPE_CUSTOM_OPENAI)
+        && (_ex_parameters.llm.model.length() == 0 || _ex_parameters.llm.model == "null")){
+        // The OpenAI-compatible endpoint has no default model; surface the
+        // misconfiguration at boot. Requests are refused at send time.
+        M5_LOGE("llm type is Custom OpenAI (%d) but model is blank; requests will be refused", LLM_TYPE_CUSTOM_OPENAI);
+    }
+
+    _ex_parameters.tts.type         = doc["tts"]["type"].as<int>();
+    _ex_parameters.tts.model        = doc["tts"]["model"].as<String>();
+    _ex_parameters.tts.voice        = doc["tts"]["voice"].as<String>();
+
+    // ★ OWNER 2026-07-12: TTS 也支持 customEndpoint / customRootCAFile / audioFormat,
+    // 镜像上面 LLM 那套, 用于把 OpenAI TTS 分支指向 Mac 上的 Claude 克隆音色 server。
+    _ex_parameters.tts.customRootCA = "";
+    if(doc["tts"]["customRootCAFile"].is<const char*>()){
+        appendRootCAFromFile(doc["tts"]["customRootCAFile"].as<String>(), _ex_parameters.tts.customRootCA);
+    }
+    if(doc["tts"]["customEndpoint"].is<const char*>()){
+        _ex_parameters.tts.customEndpoint = doc["tts"]["customEndpoint"].as<String>();
+        if(_ex_parameters.tts.customEndpoint.startsWith("https://") && _ex_parameters.tts.customRootCA.length() == 0){
+            M5_LOGE("tts customEndpoint is https:// but customRootCAFile is missing: %s", _ex_parameters.tts.customEndpoint.c_str());
+        }
+    }
+    else{
+        _ex_parameters.tts.customEndpoint = "";
+    }
+    if(doc["tts"]["audioFormat"].is<const char*>()){
+        _ex_parameters.tts.audioFormat = doc["tts"]["audioFormat"].as<String>();
+    }
+    else{
+        _ex_parameters.tts.audioFormat = "mp3";   // 未指定 = 保持原行为(OpenAI/VOICEVOX 都回 mp3)
+    }
+
+    _ex_parameters.stt.type         = doc["stt"]["type"].as<int>();
+    _ex_parameters.stt.model        = doc["stt"]["model"].as<String>();
+    // ★ OWNER 2026-07-05: STT 也支持 customEndpoint / customRootCAFile(s) / language,
+    // 镜像上面 LLM 那套, 用于把 Whisper 分支指向 硅基流动 SenseVoice 等兼容端点。
+    if(doc["stt"]["language"].is<const char*>()){
+        _ex_parameters.stt.language = doc["stt"]["language"].as<String>();
+    }
+    else{
+        _ex_parameters.stt.language = "";   // 空 = 不发 language 字段, 让服务端自判
+    }
+    _ex_parameters.stt.customRootCA = "";
+    if(doc["stt"]["customRootCAFiles"].is<JsonArray>()){
+        JsonArray ca_files = doc["stt"]["customRootCAFiles"].as<JsonArray>();
+        for(JsonVariant ca_file_path : ca_files){
+            appendRootCAFromFile(ca_file_path.as<String>(), _ex_parameters.stt.customRootCA);
+        }
+    }
+    if(doc["stt"]["customRootCAFile"].is<const char*>()){
+        appendRootCAFromFile(doc["stt"]["customRootCAFile"].as<String>(), _ex_parameters.stt.customRootCA);
+    }
+    if(doc["stt"]["customEndpoint"].is<const char*>()){
+        _ex_parameters.stt.customEndpoint = doc["stt"]["customEndpoint"].as<String>();
+        if(_ex_parameters.stt.customEndpoint.startsWith("https://") && _ex_parameters.stt.customRootCA.length() == 0){
+            M5_LOGE("stt customEndpoint is https:// but no customRootCAFile was loaded; requests will be refused: %s",
+                    _ex_parameters.stt.customEndpoint.c_str());
+        }
+    }
+    else{
+        _ex_parameters.stt.customEndpoint = "";
+    }
+
+    _ex_parameters.wakeword.type    = doc["wakeword"]["type"].as<int>();
+    _ex_parameters.wakeword.keyword = doc["wakeword"]["keyword"].as<String>();
+
+    _ex_parameters.audio.speaker_volume = doc["audio"]["speaker_volume"].as<int>();
+
+    _ex_parameters.moduleLLM.rxPin  = doc["moduleLLM"]["rxPin"].as<int>();
+    _ex_parameters.moduleLLM.txPin  = doc["moduleLLM"]["txPin"].as<int>();
+
+}
+
+void StackchanExConfig::printExtParameters(void)
+{
+    M5_LOGI("llm type: %d", _ex_parameters.llm.type);
+    M5_LOGI("llm model: %s", _ex_parameters.llm.model.c_str());
+    M5_LOGI("llm nMcpServers: %d", _ex_parameters.llm.nMcpServers);
+    for(int i=0; i<_ex_parameters.llm.nMcpServers; i++){
+        M5_LOGI("llm mcpServer[%d] name: %s", i, _ex_parameters.llm.mcpServer[i].name.c_str());
+        M5_LOGI("llm mcpServer[%d] disabled: %s", i, _ex_parameters.llm.mcpServer[i].disabled ? "true":"false");
+        M5_LOGI("llm mcpServer[%d] url: %s", i, _ex_parameters.llm.mcpServer[i].url.c_str());
+        M5_LOGI("llm mcpServer[%d] port: %d", i, _ex_parameters.llm.mcpServer[i].port);
+    }
+    M5_LOGI("llm enableMemory: %s", _ex_parameters.llm.enableMemory ? "true":"false");
+    M5_LOGI("llm customEndpoint: %s", _ex_parameters.llm.customEndpoint.c_str());
+    {
+        // Report how many certificates were bundled, which helps confirm a
+        // multi-CA customRootCAFiles list was loaded as expected.
+        int nCerts = 0;
+        int idx = 0;
+        while((idx = _ex_parameters.llm.customRootCA.indexOf("-----BEGIN CERTIFICATE-----", idx)) >= 0){
+            nCerts++;
+            idx += 27;  // length of "-----BEGIN CERTIFICATE-----"
+        }
+        M5_LOGI("llm customRootCA: %s (%d certificate(s))",
+                _ex_parameters.llm.customRootCA.length() > 0 ? "(set)" : "(none)", nCerts);
+    }
+
+
+    M5_LOGI("tts type: %d", _ex_parameters.tts.type);
+    M5_LOGI("tts model: %s", _ex_parameters.tts.model.c_str());
+    M5_LOGI("tts voice: %s", _ex_parameters.tts.voice.c_str());
+
+    M5_LOGI("stt type: %d", _ex_parameters.stt.type);
+    M5_LOGI("stt model: %s", _ex_parameters.stt.model.c_str());
+    // ★ OWNER 2026-07-05: 打印 STT 的 customEndpoint/language/证书数, 便于串口核对
+    M5_LOGI("stt language: %s", _ex_parameters.stt.language.length() > 0 ? _ex_parameters.stt.language.c_str() : "(auto)");
+    M5_LOGI("stt customEndpoint: %s", _ex_parameters.stt.customEndpoint.c_str());
+    {
+        int nCerts = 0;
+        int idx = 0;
+        while((idx = _ex_parameters.stt.customRootCA.indexOf("-----BEGIN CERTIFICATE-----", idx)) >= 0){
+            nCerts++;
+            idx += 27;
+        }
+        M5_LOGI("stt customRootCA: %s (%d certificate(s))",
+                _ex_parameters.stt.customRootCA.length() > 0 ? "(set)" : "(none)", nCerts);
+    }
+
+    M5_LOGI("wakeword type: %d", _ex_parameters.wakeword.type);
+    M5_LOGI("wakeword keyword: %s", _ex_parameters.wakeword.keyword.c_str());
+
+    M5_LOGI("audio speaker volume: %d", _ex_parameters.audio.speaker_volume);
+
+    M5_LOGI("module llm rxPin: %d", _ex_parameters.moduleLLM.rxPin);
+    M5_LOGI("module llm txPin: %d", _ex_parameters.moduleLLM.txPin);
+    
+}

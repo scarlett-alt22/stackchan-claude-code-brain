@@ -1,0 +1,864 @@
+#include "FunctionCall.h"
+#include <Avatar.h>
+#include "Robot.h"
+#include <AudioGeneratorMP3.h>
+#include "driver/AudioOutputM5Speaker.h"
+#include <HTTPClient.h>
+#include <SD.h>
+#include <SPIFFS.h>
+#include "driver/WakeWord.h"
+#include "Scheduler.h"
+#include "StackchanExConfig.h" 
+#include "share/SDUtil.h"
+#include "MCPClient.h"
+#include "llm/LLMBase.h"
+using namespace m5avatar;
+
+
+
+// 外部参照
+extern Avatar avatar;
+extern AudioGeneratorMP3 *mp3;
+extern bool servo_home;
+extern void sw_tone();
+
+static String avatarText;
+
+// タイマー機能関連
+TimerHandle_t xAlarmTimer;
+bool alarmTimerCallbacked = false;
+bool alarmTimerCanceled = false;
+void alarmTimerCallback(TimerHandle_t xTimer);
+void powerOffTimerCallback(TimerHandle_t xTimer);
+
+
+
+const String json_Functions =
+"["
+  "{"
+    "\"name\": \"update_memory\","
+    "\"description\": \"Update long-term memory.\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"memory\":{"
+          "\"type\": \"string\","
+          "\"description\": \"Summary of user attributes and memorable conversations.\""
+        "}"
+      "},"
+      "\"required\": [\"memory\"]"
+    "}"
+  "},"
+#if defined(REALTIME_API)
+  "{"
+    "\"name\": \"set_avatar_expression\","
+    "\"description\": \"Change Stack-chan's facial expression to match the current emotion.\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"expression\":{"
+          "\"type\": \"string\","
+          "\"description\": \"Facial expression to set.\","
+          "\"enum\": [\"neutral\", \"happy\", \"angry\", \"sad\", \"doubt\", \"sleepy\"]"
+        "}"
+      "},"
+      "\"required\": [\"expression\"]"
+    "}"
+  "},"
+#endif
+  "{"
+    "\"name\": \"timer\","
+    "\"description\": \"指定した時間が経過したら、指定した動作を実行する。指定できる動作はalarmとshutdown。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"time\":{"
+          "\"type\": \"integer\","
+          "\"description\": \"指定したい時間。単位は秒。\""
+        "},"
+        "\"action\":{"
+          "\"type\": \"string\","
+          "\"description\": \"指定したい動作。alarmは音で通知。shutdownは電源OFF。\","
+          "\"enum\": [\"alarm\", \"shutdown\"]"
+        "}"
+      "},"
+      "\"required\": [\"time\", \"action\"]"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"timer_change\","
+    "\"description\": \"実行中のタイマーの設定時間を変更する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"time\":{"
+          "\"type\": \"integer\","
+          "\"description\": \"変更後の時間。単位は秒。0の場合はタイマーをキャンセルする。\""
+        "}"
+      "},"
+      "\"required\": [\"time\"]"
+    "}"
+  "},"
+#if defined(ARDUINO_M5STACK_CORES3)
+#if defined(ENABLE_WAKEWORD)
+  "{"
+    "\"name\": \"register_wakeword\","
+    "\"description\": \"ウェイクワードを登録する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {}"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"wakeword_enable\","
+    "\"description\": \"ウェイクワードを有効化する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {}"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"delete_wakeword\","
+    "\"description\": \"ウェイクワードを削除する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"idx\":{"
+          "\"type\": \"integer\","
+          "\"description\": \"削除するウェイクワードの番号。\""
+        "}"
+      "},"
+      "\"required\": [\"idx\"]"
+    "}"
+  "},"
+#endif  //defined(ENABLE_WAKEWORD)
+#endif  //defined(ARDUINO_M5STACK_CORES3)
+  "{"
+    "\"name\": \"get_date\","
+    "\"description\": \"今日の日付を取得する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {}"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"get_time\","
+    "\"description\": \"現在の時刻を取得する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {}"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"get_week\","
+    "\"description\": \"今日が何曜日かを取得する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {}"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"get_volume\","
+    "\"description\": \"Get the current speaker volume. Use this before relative volume changes.\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {}"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"get_brightness\","
+    "\"description\": \"Get the current display brightness. Use this before relative brightness changes.\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {}"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"set_volume\","
+    "\"description\": \"スタックチャンのスピーカー音量を調整する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"volume\":{"
+          "\"type\": \"integer\","
+          "\"description\": \"設定する音量の値（0-255）。255が最大で、0が消音。\""
+        "}"
+      "},"
+      "\"required\": [\"volume\"]"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"set_brightness\","
+    "\"description\": \"スタックチャンの画面の明るさを調整する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"brightness\":{"
+          "\"type\": \"integer\","
+          "\"description\": \"設定する明るさの値（0-255）。255が最大で、0が最も暗い。\""
+        "}"
+      "},"
+      "\"required\": [\"brightness\"]"
+    "}"
+#if !defined(USE_EXTENSION_FUNCTIONS)
+  "}"
+#else
+  "},"
+  "{"
+    "\"name\": \"reminder\","
+    "\"description\": \"指定した時間にリマインドする。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"hour\":{"
+          "\"type\": \"integer\","
+          "\"description\": \"hour (0-23)\""
+        "},"
+        "\"min\":{"
+          "\"type\": \"integer\","
+          "\"description\": \"minute\""
+        "},"
+        "\"text\":{"
+          "\"type\": \"string\","
+          "\"description\": \"リマインドする内容\""
+        "}"
+      "},"
+      "\"required\": [\"hour\",\"min\",\"text\"]"
+    "}"
+  "},"
+  "{"
+    "\"name\": \"ask\","
+    "\"description\": \"依頼を実行するのに必要な情報を会話の相手に質問する。\","
+    "\"parameters\": {"
+      "\"type\":\"object\","
+      "\"properties\": {"
+        "\"text\":{"
+          "\"type\": \"string\","
+          "\"description\": \"質問の内容。\""
+        "}"
+      "}"
+    "}"
+  "},"
+#endif //if defined(USE_EXTENSION_FUNCTIONS)
+"]";
+
+
+void alarmTimerCallback(TimerHandle_t _xTimer){
+  xAlarmTimer = NULL;
+  //Serial.println("時間になりました。");
+  alarmTimerCallbacked = true;
+}
+
+void powerOffTimerCallback(TimerHandle_t _xTimer){
+  xAlarmTimer = NULL;
+  //Serial.println("おやすみなさい。");
+  avatar.setSpeechText("おやすみなさい。");
+  delay(2000);
+  avatar.setSpeechText("");
+  M5.Power.powerOff();
+}
+
+
+FunctionCall::FunctionCall(llm_param_t param, LLMBase* llm, MCPClient** mcpClient)
+  : _param(param),
+    _llm(llm),
+    _mcpClient(mcpClient)
+{
+
+}
+
+// Function Call関連の初期化
+void FunctionCall::init_func_call_settings(StackchanExConfig& system_config)
+{
+
+}
+
+
+String FunctionCall::exec_calledFunc(const char* name, const char* args){
+  String response = "";
+
+  Serial.println(name);
+  Serial.println(args);
+
+  DynamicJsonDocument argsDoc(256);
+  DeserializationError error = deserializeJson(argsDoc, args);
+  if (error) {
+    Serial.print(F("deserializeJson(arguments) failed: "));
+    Serial.println(error.f_str());
+    avatar.setExpression(Expression::Sad);
+    avatar.setSpeechText("エラーです");
+    response = "エラーです";
+    delay(1000);
+    avatar.setSpeechText("");
+    avatar.setExpression(Expression::Neutral);
+  }else{
+
+    //関数名がいずれかのMCPサーバに属するかを検索し、ヒットしたらリクエストを送信する
+    for(int s=0; s < _param.llm_conf.nMcpServers; s++){
+      if(true == _param.llm_conf.mcpServer[s].disabled){
+          continue;
+      }
+      if(_mcpClient[s]->search_tool(String(name))){
+        DynamicJsonDocument tool_params(512);
+        tool_params["name"] = String(name);
+        tool_params["arguments"] = argsDoc;
+        response = _mcpClient[s]->mcp_call_tool(tool_params);
+        goto END;
+      }
+    }
+
+    if(strcmp(name, "update_memory") == 0){
+      const char* memory = argsDoc["memory"];
+      Serial.println(memory);
+      response = fn_update_memory(_llm, memory);
+    }
+#if defined(REALTIME_API)
+    else if(strcmp(name, "set_avatar_expression") == 0){
+      const char* expression = argsDoc["expression"];
+      response = set_avatar_expression(expression);
+    }
+#endif
+    else if(strcmp(name, "timer") == 0){
+      const int time = argsDoc["time"];
+      const char* action = argsDoc["action"];
+      Serial.printf("time:%d\n",time);
+      Serial.println(action);
+      response = timer(time, action);
+    }
+    else if(strcmp(name, "timer_change") == 0){
+      const int time = argsDoc["time"];
+      response = timer_change(time);    
+    }
+#if defined(ARDUINO_M5STACK_CORES3)
+#if defined(ENABLE_WAKEWORD)
+    else if(strcmp(name, "register_wakeword") == 0){
+      response = register_wakeword();    
+    }
+    else if(strcmp(name, "wakeword_enable") == 0){
+      response = wakeword_enable();    
+    }
+    else if(strcmp(name, "delete_wakeword") == 0){
+      const int idx = argsDoc["idx"];
+      Serial.printf("idx:%d\n",idx);   
+      response = delete_wakeword(idx);    
+    }
+#endif  //defined(ENABLE_WAKEWORD)
+#endif  //defined(ARDUINO_M5STACK_CORES3)
+    else if(strcmp(name, "get_date") == 0){
+      response = get_date();    
+    }
+    else if(strcmp(name, "get_time") == 0){
+      response = get_time();    
+    }
+    else if(strcmp(name, "get_week") == 0){
+      response = get_week();    
+    }
+    else if(strcmp(name, "get_volume") == 0){
+      response = get_volume();
+    }
+    else if(strcmp(name, "get_brightness") == 0){
+      response = get_brightness();
+    }
+    else if(strcmp(name, "set_volume") == 0){
+      const int volume = argsDoc["volume"];
+      response = set_volume(volume);    
+    }
+    else if(strcmp(name, "set_brightness") == 0){
+      const int brightness = argsDoc["brightness"];
+      response = set_brightness(brightness);    
+    }
+#if defined(USE_EXTENSION_FUNCTIONS)
+    else if(strcmp(name, "reminder") == 0){
+      const int hour = argsDoc["hour"];
+      const int min = argsDoc["min"];
+      const char* text = argsDoc["text"];
+      response = reminder(hour, min, text);
+    }
+    else if(strcmp(name, "ask") == 0){
+      const char* text = argsDoc["text"];
+      Serial.println(text);
+      response = ask(text);
+    }
+#endif  //if defined(USE_EXTENSION_FUNCTIONS)
+
+  }
+
+END:
+  return response;
+}
+
+
+String FunctionCall::fn_update_memory(LLMBase* llm, const char* memory){
+  String response = "";
+  if(llm->enableMemory()){
+    if(llm->save_userInfo(memory)){
+      response = "Memory update successful.";
+    }else{
+      response = "Memory update failure.";
+    }
+  }
+  else{
+    response = "Memory is disabled.";
+  }
+
+  Serial.println(response);
+  return response;
+}
+
+#if defined(REALTIME_API)
+String FunctionCall::set_avatar_expression(const char* expression){
+  if(expression == NULL){
+    return "Avatar expression is missing.";
+  }
+
+  String expressionName = String(expression);
+  expressionName.toLowerCase();
+
+  Expression avatarExpression = Expression::Neutral;
+  if(expressionName.equals("neutral")){
+    avatarExpression = Expression::Neutral;
+  }
+  else if(expressionName.equals("happy")){
+    avatarExpression = Expression::Happy;
+  }
+  else if(expressionName.equals("angry")){
+    avatarExpression = Expression::Angry;
+  }
+  else if(expressionName.equals("sad")){
+    avatarExpression = Expression::Sad;
+  }
+  else if(expressionName.equals("doubt")){
+    avatarExpression = Expression::Doubt;
+  }
+  else if(expressionName.equals("sleepy")){
+    avatarExpression = Expression::Sleepy;
+  }
+  else{
+    return "Unknown avatar expression: " + expressionName;
+  }
+
+  avatar.setExpression(avatarExpression);
+  return "Avatar expression set to " + expressionName + ".";
+}
+#endif
+
+
+String FunctionCall::timer(int32_t time, const char* action){
+  String response = "";
+
+  if(xAlarmTimer != NULL){
+    response = "別のタイマーを実行中です。";
+  }
+  else{
+    if(strcmp(action, "alarm") == 0){
+      xAlarmTimer = xTimerCreate("Timer", time * 1000, pdFALSE, 0, alarmTimerCallback);
+      if(xAlarmTimer != NULL){
+        xTimerStart(xAlarmTimer, 0);
+        response = String("アラーム設定成功。") ;
+      }
+      else{
+        response = "タイマーの設定が失敗しました。";
+      }
+    }
+    else if(strcmp(action, "shutdown") == 0){
+      xAlarmTimer = xTimerCreate("Timer", time * 1000, pdFALSE, 0, powerOffTimerCallback);
+      if(xAlarmTimer != NULL){
+        xTimerStart(xAlarmTimer, 0);
+        response = String(time) + "秒後にパワーオフします。";
+      }
+      else{
+        response = "タイマー設定が失敗しました。";
+      }
+    }
+  }
+
+  Serial.println(response);
+  return response;
+}
+
+String FunctionCall::timer_change(int32_t time){
+  String response = "";
+  if(time == 0){
+    xTimerDelete(xAlarmTimer, 0);
+    xAlarmTimer = NULL;
+    response = "タイマーをキャンセルしました。";
+    alarmTimerCanceled = true;
+  }
+  else{
+    xTimerChangePeriod(xAlarmTimer, time * 1000, 0);
+    response = "タイマーの設定時間を" + String(time) + "秒に変更しました。";
+  }
+
+  return response;
+}
+
+
+String FunctionCall::get_date(){
+  String response = "";
+  struct tm timeInfo; 
+
+  if (getLocalTime(&timeInfo)) {                            // timeinfoに現在時刻を格納
+    response = String(timeInfo.tm_year + 1900) + "年"
+               + String(timeInfo.tm_mon + 1) + "月"
+               + String(timeInfo.tm_mday) + "日";
+  }
+  else{
+    response = "時刻取得に失敗しました。";
+  }
+  return response;
+}
+
+String FunctionCall::get_time(){
+  String response = "";
+  struct tm timeInfo; 
+
+  if (getLocalTime(&timeInfo)) {                            // timeinfoに現在時刻を格納
+    response = String(timeInfo.tm_hour) + "時" + String(timeInfo.tm_min) + "分";
+  }
+  else{
+    response = "時刻取得に失敗しました。";
+  }
+  return response;
+}
+
+
+String FunctionCall::get_week(){
+  String response = "";
+  struct tm timeInfo; 
+  const char week[][8] = {"日", "月", "火", "水", "木", "金", "土"};
+
+  if (getLocalTime(&timeInfo)) {                            // timeinfoに現在時刻を格納
+    response = String(week[timeInfo.tm_wday]) + "曜日";
+  }
+  else{
+    response = "時刻取得に失敗しました。";
+  }
+  return response;
+}
+
+String FunctionCall::get_volume(){
+  String response = "Current speaker volume is " + String(robot->spk_volume) + " (0-255).";
+  Serial.println(response);
+  return response;
+}
+
+String FunctionCall::get_brightness(){
+  const int brightness = M5.Display.getBrightness();
+  String response = "Current display brightness is " + String(brightness) + " (0-255).";
+  Serial.println(response);
+  return response;
+}
+
+String FunctionCall::set_volume(int volume){
+  if(volume < 0) volume = 0;
+  if(volume > 255) volume = 255;
+  
+  robot->spk_volume = (uint8_t)volume;
+  M5.Speaker.setVolume(robot->spk_volume);
+  
+  String response = "音量を" + String(volume) + "に設定しました。";
+  Serial.println(response);
+  return response;
+}
+
+String FunctionCall::set_brightness(int brightness){
+  if(brightness < 0) brightness = 0;
+  if(brightness > 255) brightness = 255;
+  
+  M5.Display.setBrightness(brightness);
+  
+  String response = "画面の明るさを" + String(brightness) + "に設定しました。";
+  Serial.println(response);
+  return response;
+}
+
+#if defined(ARDUINO_M5STACK_CORES3)
+#if defined(ENABLE_WAKEWORD)
+bool register_wakeword_required = false;
+String FunctionCall::register_wakeword(void){
+  String response = "ウェイクワードを登録します。合図の後にウェイクワードを発声してください。";
+  register_wakeword_required = true;
+  return response;
+}
+
+bool wakeword_enable_required = false;
+String FunctionCall::wakeword_enable(void){
+  String response = "ウェイクワードを有効化しました。";
+  wakeword_enable_required = true;
+  return response;
+}
+
+String FunctionCall::delete_wakeword(int idx){
+  SPIFFS.begin(true);
+  String filename = filename_base + String(idx) + String(".bin");
+  if (SPIFFS.exists(filename.c_str()))
+  {
+    SPIFFS.remove(filename.c_str());
+    delete_mfcc(idx);
+  }
+  String response = String("ウェイクワード#") + String(idx) + String("を削除しました。");
+  return response;
+}
+#endif  //defined(ENABLE_WAKEWORD)
+#endif  //defined(ARDUINO_M5STACK_CORES3)
+
+
+#if defined(USE_EXTENSION_FUNCTIONS)
+
+String FunctionCall::reminder(int hour, int min, const char* text){
+  String response = "";
+  int ret;
+  
+  Serial.println("reminder");
+  Serial.printf("%d:%d\n", hour, min);
+  Serial.println(text);
+
+  add_schedule(new ScheduleReminder(hour, min, String(text)));
+  
+  //response = String("Reminder setting successful");
+  response = String(String("リマインドの設定成功。")
+                    + String(hour) + ":" + String(min) + " "
+                    + String(text));
+  
+  avatarText = String(hour) + ":" + String(min) + String("に設定しました");
+  avatar.setSpeechText(avatarText.c_str());
+  delay(2000);
+  return response;
+}
+
+
+String FunctionCall::ask(const char* text){
+
+  bool prev_servo_home = servo_home;
+//#ifdef USE_SERVO
+  servo_home = true;
+//#endif
+  avatar.setExpression(Expression::Happy);
+  robot->speech(String(text));
+  sw_tone();
+  avatar.setSpeechText("どうぞ話してください");
+  String ret = robot->listen();
+//#ifdef USE_SERVO
+  servo_home = prev_servo_home;
+//#endif
+  Serial.println("音声認識終了");
+  if(ret != "") {
+    Serial.println(ret);
+
+  } else {
+    Serial.println("音声認識失敗");
+    avatar.setExpression(Expression::Sad);
+    avatar.setSpeechText("聞き取れませんでした");
+    delay(2000);
+
+  } 
+
+  avatar.setSpeechText("");
+  avatar.setExpression(Expression::Neutral);
+  //M5.Speaker.begin();
+
+  return ret;
+}
+
+
+String FunctionCall::save_note(const char* text){
+  String response = "";
+  String filename = String(APP_DATA_PATH) + String(FNAME_NOTEPAD);
+  
+  if (sd_begin_cores3(10000000)) {
+    auto fs = SD.open(filename.c_str(), FILE_WRITE, true);
+
+    if(fs) {
+      if(note == ""){
+        note = String(text);
+      }
+      else{
+        note = note + "\n" + String(text);
+      }
+      Serial.println(note);
+      fs.write((uint8_t*)note.c_str(), note.length());
+      fs.close();
+      SD.end();
+      //response = "Note saved successfully";
+      response = String("メモの保存成功。メモの内容：" + String(text));
+    }
+    else{
+      response = "メモの保存に失敗しました";
+      SD.end();
+    }
+
+  }
+  else{
+    response = "メモの保存に失敗しました";
+  }
+  return response;
+}
+
+String FunctionCall::read_note(){
+  String response = "";
+  if(note == ""){
+    response = "メモはありません";
+  }
+  else{
+    response = "メモの内容は次の通り。" + note;
+  }
+  return response;
+}
+
+String FunctionCall::delete_note(){
+  String response = "";
+  String filename = String(APP_DATA_PATH) + String(FNAME_NOTEPAD);
+
+
+  if (sd_begin_cores3(10000000)) {
+    auto fs = SD.open(filename.c_str(), FILE_WRITE, true);
+
+    if(fs) {
+      note = "";
+      fs.write((uint8_t*)note.c_str(), note.length());
+      fs.close();
+      SD.end();
+      response = "メモを消去しました";
+    }
+    else{
+      response = "メモの消去に失敗しました";
+      SD.end();
+    }
+  }
+  else{
+    response = "メモの消去に失敗しました";
+  }
+  return response;
+}
+
+
+String FunctionCall::get_bus_time(int nNext){
+  String response = "";
+  String filename = "";
+  int now;
+  int nNextCnt = 0;
+  struct tm timeInfo;
+
+  if (getLocalTime(&timeInfo)) {                            // timeinfoに現在時刻を格納
+    Serial.printf("現在時刻 %02d:%02d  曜日 %d\n", timeInfo.tm_hour, timeInfo.tm_min, timeInfo.tm_wday);
+    now = timeInfo.tm_hour * 60 + timeInfo.tm_min;
+    
+    switch(timeInfo.tm_wday){
+      case 0:   //日
+        filename = String(APP_DATA_PATH) + (FNAME_BUS_TIMETABLE_HOLIDAY);
+        break;
+      case 1:   //月
+      case 2:   //火
+      case 3:   //水
+      case 4:   //木
+      case 5:   //金
+        filename = String(APP_DATA_PATH) + (FNAME_BUS_TIMETABLE);
+        break;
+      case 6:   //土
+        filename = String(APP_DATA_PATH) + (FNAME_BUS_TIMETABLE_SAT);
+        break;
+    }
+
+    if (sd_begin_cores3(10000000)) {
+      auto fs = SD.open(filename.c_str(), FILE_READ);
+
+      if(fs) {
+        int hour, min;
+        size_t max = 8;
+        char buf[max];
+
+        for(int line=0; line<200; line++){
+          int len = fs.readBytesUntil(0x0a, (uint8_t*)buf, max);
+          if(len == 0){
+            Serial.printf("End of file. total line : %d\n", line);
+            response = "最後の発車時刻を過ぎました。";
+            break;
+          }
+          else{
+            sscanf(buf, "%d:%d", &hour, &min);
+            Serial.printf("%03d %02d:%02d\n", line, hour, min);
+
+            int table = hour * 60 + min;
+            if(now < table){
+              if(nNextCnt == nNext){
+                response = String(hour) + "時" + String(min) + "分";
+                break;
+              }
+              else{
+                nNextCnt ++;
+              }
+            }
+
+          }
+        }
+        fs.close();
+
+      } else {
+        Serial.println("Failed to SD.open().");    
+        response = "時刻表の読み取りに失敗しました。";  
+      }
+
+      SD.end();
+    }
+    else{
+      response = "時刻表の読み取りに失敗しました。";
+    }
+  }
+  else{
+    response = "現在時刻の取得に失敗しました。";
+  }
+
+  return response;
+}
+
+
+//メッセージをメールで送信する関数
+// ※EMailSenderライブラリのインクルード、及びplatformio.iniのlib_depsでの宣言を有効化してください。
+String FunctionCall::send_mail(String msg) {
+  String response = "";
+  EMailSender::EMailMessage message;
+
+  if (authMailAdr != "") {
+
+    EMailSender emailSend(authMailAdr.c_str(), authAppPass.c_str());
+
+    message.subject = "スタックチャンからの通知";
+    message.message = msg;
+    EMailSender::Response resp = emailSend.send(toMailAdr.c_str(), message);
+
+    if(resp.status == true){
+      response = "メール送信成功";
+    }
+    else{
+      response = "メール送信失敗";
+    }
+
+  }
+  else{
+    response = "メールアカウント情報のエラー";
+  }
+
+
+  return response;
+}
+
+//受信したメールを読み上げる
+String FunctionCall::read_mail(void) {
+  String response = "";
+
+  if(recvMessages.size() > 0){
+    response = String(recvMessages[0]);
+    recvMessages.pop_front();
+    prev_nMail = recvMessages.size();
+  }
+  else{
+    response = "受信メールはありません。";
+  }
+  
+  return response;
+}
+
+
+#endif  //if defined(USE_EXTENSION_FUNCTIONS)
+
+

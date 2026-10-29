@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Local STT (extras/stt_whisper_server.py) on 127.0.0.1:8126.
+     Copy stt_whisper_server.py + start_stt.sh into __HOME__/Library/Application Support/StackChanSTT/,
+     create the venv there (python3 -m venv .venv && .venv/bin/pip install mlx-whisper numpy),
+     replace __HOME__ with your home directory, then:
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.stackchan-stt.plist -->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>__HOME__</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
+		<key>STT_HOST</key>
+		<string>127.0.0.1</string>
+		<key>STT_LANG</key>
+		<string>zh</string>
+		<key>STT_MODEL</key>
+		<string>mlx-community/whisper-large-v3-turbo</string>
+		<key>STT_PORT</key>
+		<string>8126</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.example.stackchan-stt</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>__HOME__/Library/Application Support/StackChanSTT/start_stt.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/Library/Logs/stackchan-stt.log</string>
+	<key>StandardOutPath</key>
+	<string>__HOME__/Library/Logs/stackchan-stt.log</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>WorkingDirectory</key>
+	<string>__HOME__/Library/Application Support/StackChanSTT</string>
+</dict>
+</plist>

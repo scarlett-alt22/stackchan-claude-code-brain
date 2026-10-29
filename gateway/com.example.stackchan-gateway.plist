@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.stackchan-gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/python3.12</string>
+    <string>__HOME__/Library/Application Support/StackChanGateway/stackchan_gateway.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>STACKCHAN_GATEWAY_HOST</key>
+    <string>0.0.0.0</string>
+    <key>STACKCHAN_GATEWAY_PORT</key>
+    <string>8124</string>
+    <key>STACKCHAN_UPSTREAM_URL</key>
+    <string>https://YOUR_VPS_IP:8443/v1/chat/completions</string>
+    <key>STACKCHAN_UPSTREAM_CA</key>
+    <string>__HOME__/Library/Application Support/StackChanGateway/shim_ca.pem</string>
+    <key>STACKCHAN_DEVICE_TOKEN_SHA256</key>
+    <string>__STACKCHAN_DEVICE_TOKEN_SHA256__</string>
+    <!-- ★2026-07-25 STT 从远程 siliconflow 搬回本机（mlx-whisper，launchd :8126）：
+         7.2s→1.0s，并治掉了「主人的话被识别成乱码、机器人照着乱码答」。
+         网关代码零改动，上游就是这个环境变量。
+         ★2026-08-04 补记：这一改当初只落在运行时 plist 里，模板一直还写着远程，
+         此刻才回流。装回远程 = 把上面那两样一起丢掉。 -->
+    <key>STACKCHAN_STT_UPSTREAM_URL</key>
+    <string>http://127.0.0.1:8126/v1/audio/transcriptions</string>
+    <key>STACKCHAN_STT_TOKEN_SHA256</key>
+    <string>__STACKCHAN_STT_TOKEN_SHA256__</string>
+    <!-- ★ 回环流量不许走系统代理。这台机器上 Clash 常年开着系统代理，
+         没有这两条，网关调本机 :8126 / :8123 会被拽进代理链路。
+         大小写两份都要：Python 的 urllib 认 no_proxy，别的库认 NO_PROXY。 -->
+    <key>NO_PROXY</key>
+    <string>127.0.0.1,localhost</string>
+    <key>no_proxy</key>
+    <string>127.0.0.1,localhost</string>
+    <!-- ★2026-10-04 机器人的脑子＝主人最近说话的那个 Claude Code 窗口（cc_brain.py，
+         claude -p --resume … --fork-session）。改成 api（或删掉这一条）＝退回旧的
+         VPS 中转。PATH 是给 claude 子进程的：launchd 默认 PATH 里没有 /opt/homebrew/bin。 -->
+    <key>STACKCHAN_BRAIN</key>
+    <string>cc</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/stackchan-gateway.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/stackchan-gateway.log</string>
+</dict>
+</plist>
