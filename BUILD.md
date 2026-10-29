@@ -42,7 +42,7 @@ Mac :8124 gateway
 | Device token is stored only as SHA-256 (`STACKCHAN_DEVICE_TOKEN_SHA256`) | If `STACKCHAN_STT_TOKEN_SHA256` is not 64 hex chars the gateway refuses to start. That is intended. |
 | Do not reformat SPIFFS or switch to LittleFS | The robot's persona is stored in SPIFFS. |
 | Do not add "wait until the buffer is full" logic to the audio read path | Measured: it stretched 3.5 s of audio to 13 s of playback. |
-| Real IPs, SSIDs, keys, tokens never go into git | See [PUBLISHING_CHECKLIST.md](PUBLISHING_CHECKLIST.md). |
+| Real IPs, SSIDs, keys, tokens never go into git | The repo is public. Real values live only in `SD-staging/` and launchd env, both outside git. |
 
 ## Stage A — make it speak with the owner's session
 

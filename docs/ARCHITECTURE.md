@@ -82,7 +82,7 @@ fork 出来的分支带着原会话的上下文，但 `--tools ""` + `--strict-m
 
 同理，机器人拍的照片只存到 Mac，这一轮的回答看不到它。
 
-> persona prompt 本人是私人的：公开版只描述机制（上一段），不抄录原文。见 PUBLISHING_CHECKLIST。
+> persona prompt 本人是私人的：公开版只描述机制（上一段），不抄录原文。
 
 ## TTS：MiniMax 克隆嗓音（`extras/tts_minimax_server.py`，:8125）
 
@@ -104,4 +104,4 @@ fork 出来的分支带着原会话的上下文，但 `--tools ""` + `--strict-m
 
 ## 天气工具
 
-网关在用户问天气时才做 geocoding（Open-Meteo），默认城市目前硬编码在 `stackchan_gateway.py` 的 `DEFAULT_LOCATION` 里。**发布前必须改成可配置**——见 PUBLISHING_CHECKLIST。
+网关在用户问天气时才做 geocoding（Open-Meteo）。默认城市读 `location.json`（路径由 `STACKCHAN_LOCATION_FILE` 指定，默认 `~/StackChan/location.json`，内容如 `{"query": "巴黎"}`），每次请求都重读，出门换城市改这个文件即可，不用重启。文件不存在时用 `stackchan_gateway.py` 里的 `DEFAULT_LOCATION`；文件存在但读不了、不是合法 JSON 或没有 `query`，也用它，并打一条警告。
